@@ -1,0 +1,30 @@
+{
+  "http_host": "127.0.0.1",
+  "http_port": 8088,
+  "poll_interval": 60,
+  "lookback_messages": 30,
+  "graph_application": {
+    "enabled": false,
+    "tenant_id": "",
+    "client_id": "",
+    "client_secret": "",
+    "mailboxes": [],
+    "filters": {
+      "keywords": ["verification", "security code", "login code", "otp", "code"]
+    }
+  },
+  "accounts": [],
+  "webui": {
+    "admin": {
+      "username": "admin",
+      "password_hash": "CHANGE_ME"
+    },
+    "proxy": {
+      "enabled": false,
+      "http_proxy": "",
+      "https_proxy": "",
+      "no_proxy": "127.0.0.1,localhost"
+    },
+    "theme": "system"
+  }
+}

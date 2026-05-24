@@ -1,0 +1,26 @@
+# Secrets and local config
+.env
+*.env
+*.secret
+*secret*
+config.json
+email_otp_service.json
+
+# Local data
+*.sqlite
+*.sqlite3
+*.db
+*.db-wal
+*.db-shm
+
+# Python/cache/logs
+__pycache__/
+*.py[cod]
+*.log
+.cache/
+.pytest_cache/
+
+# OS/editor
+.DS_Store
+.vscode/
+.idea/
