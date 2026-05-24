@@ -1,0 +1,17 @@
+services:
+  email-otp-webui:
+    build: .
+    image: email-otp-webui:latest
+    container_name: email-otp-webui
+    restart: unless-stopped
+    ports:
+      - "8090:8090"
+    environment:
+      TZ: Asia/Shanghai
+      EMAIL_OTP_CONFIG: /app/config/config.json
+      EMAIL_OTP_DB: /app/data/email_otp_service.sqlite3
+      EMAIL_OTP_WEBUI_SECRET: /app/config/webui.secret
+      EMAIL_OTP_REFRESH_URL: http://127.0.0.1:8088/refresh
+    volumes:
+      - ./config:/app/config
+      - ./data:/app/data
