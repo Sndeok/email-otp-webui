@@ -468,13 +468,13 @@ html[data-theme="light"] .theme-select{background-image:url("data:image/svg+xml,
 </style>
 </head>
 <body>
-<div class="login-theme"><span class="login-theme-label">主题</span><select id="theme" class="theme-select" aria-label="主题模式"><option value="system">跟随系统</option><option value="light">明亮模式</option><option value="dark">暗黑模式</option></select></div>
+<div class="login-theme"><select id="theme" class="theme-select" aria-label="主题模式"><option value="system">跟随系统</option><option value="light">明亮模式</option><option value="dark">暗黑模式</option></select></div>
 <main class="shell">
   <section class="hero" aria-label="产品说明">
     <div>
       <div class="brand"><div class="logo">OTP</div><div><div class="eyebrow">Email verification center</div><strong>邮箱验证码中心</strong></div></div>
       <h1>把散落在邮箱里的验证码，集中到一个干净入口。</h1>
-      <p>统一读取 IMAP / POP 邮箱与 Microsoft Graph 邮箱，验证码高亮、快速查询、批量管理，适合放在内网或软路由上长期运行。</p>
+      <p>统一读取 IMAP / POP 邮箱与 Microsoft Graph 邮箱，验证码高亮、快速查询、批量管理。</p>
       <div class="chips"><span class="chip">本地缓存</span><span class="chip">Graph Mailbox</span><span class="chip">明暗主题</span><span class="chip">SQLite 持久化</span></div>
     </div>
     <div class="foot"><span><i class="dot"></i>Local first</span><span>请勿暴露到公网</span></div>
@@ -486,7 +486,6 @@ html[data-theme="light"] .theme-select{background-image:url("data:image/svg+xml,
     <div class="field"><label for="username">用户名</label><input id="username" name="username" autofocus autocomplete="username" placeholder="admin"></div>
     <div class="field"><label for="password">密码</label><input id="password" name="password" type="password" autocomplete="current-password" placeholder="输入管理员密码"></div>
     <button type="submit">进入控制台</button>
-    <div class="hint">如果首次部署无法登录，请检查配置中的 <code>password_hash</code> 是否为 pbkdf2_sha256$salt$digest 格式。</div>
   </form>
 </main>
 <script>
