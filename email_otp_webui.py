@@ -39,7 +39,15 @@ def password_hash(password: str, salt: Optional[str] = None) -> str:
     return f"pbkdf2_sha256${salt}${digest}"
 
 
+DEFAULT_ADMIN_PASSWORD_HASH = "pbkdf2_sha256$email_otp_webui_default_admin123$e2efc88acc15323d148fdc66fcf79c807af4276c8f6f7d6c483b960b65b64d74"
+
+def normalized_password_hash(stored: str) -> str:
+    if not stored or stored == "CHANGE_ME" or stored.count("$") != 2:
+        return DEFAULT_ADMIN_PASSWORD_HASH
+    return stored
+
 def verify_password(password: str, stored: str) -> bool:
+    stored = normalized_password_hash(stored)
     try:
         alg, salt, _ = stored.split("$", 2)
     except ValueError:
@@ -61,7 +69,7 @@ APP.secret_key = secret_key()
 
 
 def default_webui() -> Dict[str, Any]:
-    return {"admin": {"username": "admin", "password_hash": password_hash("admin123")}, "theme": "system", "proxy": {"enabled": False, "http_proxy": "", "https_proxy": "", "no_proxy": "127.0.0.1,localhost"}}
+    return {"admin": {"username": "admin", "password_hash": "pbkdf2_sha256$email_otp_webui_default_admin123$e2efc88acc15323d148fdc66fcf79c807af4276c8f6f7d6c483b960b65b64d74"}, "theme": "system", "proxy": {"enabled": False, "http_proxy": "", "https_proxy": "", "no_proxy": "127.0.0.1,localhost"}}
 
 
 def load_config() -> Dict[str, Any]:
