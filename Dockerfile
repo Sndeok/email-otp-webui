@@ -6,7 +6,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-RUN pip install --no-cache-dir flask
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
 
 COPY email_otp_service.py email_otp_webui.py config.example.json ./
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh

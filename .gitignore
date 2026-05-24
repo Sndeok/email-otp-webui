@@ -5,6 +5,9 @@
 *secret*
 config.json
 email_otp_service.json
+config/config.json
+config/*.secret
+config/webui.secret
 
 # Local data
 *.sqlite
@@ -12,6 +15,11 @@ email_otp_service.json
 *.db
 *.db-wal
 *.db-shm
+data/*.sqlite
+data/*.sqlite3
+data/*.db
+data/*.db-wal
+data/*.db-shm
 
 # Python/cache/logs
 __pycache__/

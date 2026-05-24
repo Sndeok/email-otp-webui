@@ -1,0 +1,26 @@
+# Git / Python
+.git
+.gitignore
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.cache/
+
+# Secrets and local runtime files
+.env
+*.env
+*.secret
+config/config.json
+config/*.json
+data/
+*.sqlite
+*.sqlite3
+*.db
+*.db-wal
+*.db-shm
+*.log
+
+# Editors / OS
+.DS_Store
+.vscode/
+.idea/
