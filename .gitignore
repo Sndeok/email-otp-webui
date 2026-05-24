@@ -4,8 +4,9 @@
 *.secret
 *secret*
 config.json
+!config/config.json
 email_otp_service.json
-config/config.json
+config/config.local.json
 config/*.secret
 config/webui.secret
 

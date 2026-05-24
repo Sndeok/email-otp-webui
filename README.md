@@ -73,7 +73,7 @@ http://你的设备IP:8090
 密码：admin123
 ```
 
-首次启动时，如果 `config/config.json` 不存在，容器会自动从 `config.example.json` 复制生成一份。
+如果 `config/config.json` 不存在，容器也会自动从 `config.example.json` 复制生成一份。当前仓库已经附带一份脱敏默认 `config/config.json`，下载后可以直接启动。
 
 查看日志：
 

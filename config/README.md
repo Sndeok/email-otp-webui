@@ -2,15 +2,9 @@
 
 This directory is mounted into the Docker container as `/app/config`.
 
-On first container start, `docker-entrypoint.sh` copies `/app/config.example.json` to:
+`config/config.json` 是随仓库提供的脱敏默认配置，方便下载后直接运行。它不包含真实邮箱、Graph Secret 或 token。
 
-```text
-config/config.json
-```
-
-`config/config.json` contains real mailbox credentials and Microsoft Graph secrets, so it is intentionally ignored by Git.
-
-You can also create it manually:
+运行后你可以直接在 WebUI 中修改配置；如果想手动编辑：
 
 ```bash
 cp config.example.json config/config.json
