@@ -217,21 +217,37 @@ def fetch_accounts():
     return sorted(rows, key=lambda x: (x.get("username") or x.get("name") or "").lower())
 
 
+def account_variants(value: str) -> set[str]:
+    value = str(value or "").strip()
+    if not value:
+        return set()
+    bases = {value}
+    # Historical Graph DB names used "@" -> "_" while keeping dots.
+    # Some UI/config paths use a fully normalized form with both "@" and "." -> "_".
+    # If we receive that full-underscore form, reconstruct the likely mailbox by
+    # treating the first underscore as "@" and the remaining underscores as dots.
+    if "@" not in value and "_" in value:
+        local, _, domain = value.partition("_")
+        if local and domain and "_" in domain:
+            bases.add(local + "@" + domain.replace("_", "."))
+    variants: set[str] = set()
+    for base in bases:
+        variants.add(base)
+        variants.add(base.replace("@", "_"))
+        variants.add(base.replace("@", "_").replace(".", "_"))
+    return variants
+
+
 def configured_account_names(cfg: Optional[Dict[str, Any]] = None) -> set[str]:
     cfg = cfg or load_config()
     names: set[str] = set()
     for account in cfg.get("accounts", []) or []:
         username = account.get("username") or account.get("email") or ""
         name = account.get("name") or username.replace("@", "_").replace(".", "_")
-        if name:
-            names.add(name)
-        if username:
-            names.add(username)
+        names.update(account_variants(name))
+        names.update(account_variants(username))
     for mailbox in ((cfg.get("graph_application") or {}).get("mailboxes") or []):
-        mailbox = str(mailbox or "").strip()
-        if mailbox:
-            names.add(mailbox)
-            names.add(mailbox.replace("@", "_").replace(".", "_"))
+        names.update(account_variants(mailbox))
     return names
 
 
@@ -276,19 +292,25 @@ def fetch_messages(account=None, keyword=None, sender=None, limit=20):
     # If all mailbox/account configs were deleted, do not show stale cached OTPs.
     if not allowed:
         return []
-    if account and account not in allowed:
+    selected_variants = account_variants(account) if account else set()
+    if account and not (selected_variants & allowed):
         return []
     conn = db_conn()
     clauses = []
     params = []
     try:
         if account:
-            clauses.append("account_name = ?")
-            params.append(account)
+            values = sorted(selected_variants)
+            placeholders = ",".join("?" for _ in values)
+            clauses.append(f"(account_name IN ({placeholders}) OR recipient IN ({placeholders}))")
+            params.extend(values)
+            params.extend(values)
         else:
-            placeholders = ",".join("?" for _ in allowed)
-            clauses.append(f"account_name IN ({placeholders})")
-            params.extend(sorted(allowed))
+            values = sorted(allowed)
+            placeholders = ",".join("?" for _ in values)
+            clauses.append(f"(account_name IN ({placeholders}) OR recipient IN ({placeholders}))")
+            params.extend(values)
+            params.extend(values)
         if sender:
             clauses.append("sender LIKE ?")
             params.append(f"%{sender}%")
