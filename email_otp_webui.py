@@ -199,6 +199,22 @@ def fetch_accounts():
         finally:
             conn.close()
     seen = {r.get("name") for r in rows}
+    for mailbox in sorted(graph_mailboxes, key=str.lower):
+        name = mailbox.replace("@", "_")
+        normalized_name = mailbox.replace("@", "_").replace(".", "_")
+        if name not in seen and normalized_name not in seen and mailbox not in seen:
+            rows.append({
+                "name": name,
+                "provider": "graph_application",
+                "username": mailbox,
+                "imap_host": "Microsoft Graph",
+                "poll_interval": cfg.get("poll_interval") or 60,
+                "enabled": 1,
+                "last_uid": 0,
+                "last_error": "未刷新；点击刷新后会读取",
+                "updated_at": "config",
+            })
+            seen.add(name)
     for a in cfg.get("accounts", []):
         name = a.get("name") or (a.get("username") or a.get("email") or "").replace("@", "_").replace(".", "_")
         if name and name not in seen:
@@ -738,6 +754,8 @@ def api_config_put():
             graph[key] = graph_payload[key]
     if graph_payload.get("client_secret"):
         graph["client_secret"] = graph_payload["client_secret"]
+    if graph.get("tenant_id") and graph.get("client_id") and graph.get("client_secret"):
+        graph["enabled"] = True
     save_config(cfg)
     return jsonify({"ok": True, "config": sanitized_config(cfg)})
 
@@ -760,6 +778,7 @@ def api_mailboxes():
     graph = cfg.setdefault("graph_application", {})
     boxes = graph.setdefault("mailboxes", [])
     if request.method == "POST":
+        graph["enabled"] = True
         existing = {m.lower() for m in boxes}
         for mailbox in mailboxes:
             if mailbox.lower() not in existing:
