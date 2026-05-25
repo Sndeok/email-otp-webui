@@ -607,7 +607,7 @@ function renderMailboxes(list){$('mailboxes').innerHTML=list.map(m=>`<div class=
 function selectedMailboxes(){return [...document.querySelectorAll('.mailbox-check:checked')].map(x=>x.value)}
 function updateMailboxBulkActions(){const n=selectedMailboxes().length;const el=$('mailboxBulkActions');if(el)el.classList.toggle('show',n>0);const c=$('mailboxSelectedCount');if(c)c.textContent='已选 '+n}
 function selectAllMailboxes(v){document.querySelectorAll('.mailbox-check').forEach(x=>x.checked=v);updateMailboxBulkActions()}
-async function addMailbox(){const values=$('newMailbox').value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);const unique=[...new Set(values)];if(!unique.length){toast('请填写邮箱，一行一个');return}let ok=0,fail=0;for(const mailbox of unique){try{await api('/api/config/mailboxes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mailbox})});ok++}catch(e){fail++}}$('newMailbox').value='';toast(`新增完成：成功 ${ok}，失败 ${fail}`);await loadConfig();await loadAccounts()}
+async function addMailbox(){const values=$('newMailbox').value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);const unique=[...new Set(values)];if(!unique.length){toast('请填写邮箱，一行一个');return}let ok=0,fail=0,lastMailboxes=null;for(const mailbox of unique){try{const r=await api('/api/config/mailboxes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mailbox})});lastMailboxes=r.mailboxes||lastMailboxes;ok++}catch(e){fail++}}$('newMailbox').value='';if(lastMailboxes)renderMailboxes(lastMailboxes);toast(`新增完成：成功 ${ok}，失败 ${fail}`);await loadConfig();await loadAccounts()}
 async function deleteMailbox(m){const ok=await pageConfirm({title:'删除 Graph 邮箱',message:'确定删除这个 Graph 邮箱吗？\n'+m,okText:'确认删除'});if(!ok)return;await api('/api/config/mailboxes',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({mailbox:m})});toast('已删除');await loadConfig();await loadAccounts()}
 async function batchDeleteMailboxes(){const boxes=selectedMailboxes();if(!boxes.length){toast('请先选择 Graph 邮箱');return}const ok=await pageConfirm({title:'批量删除 Graph 邮箱',message:`确定删除 ${boxes.length} 个 Graph 邮箱吗？`,okText:'确认删除'});if(!ok)return;await api('/api/config/mailboxes',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({mailboxes:boxes})});toast('批量删除完成');await loadConfig();await loadAccounts()}
 async function saveSettings(){const payload={poll_interval:Number($('pollInterval').value||60),lookback_messages:Number($('lookback').value||30),admin_username:$('adminUser').value.trim(),admin_password:$('adminPass').value,graph:{tenant_id:$('tenantId').value.trim(),client_id:$('clientId').value.trim(),client_secret:$('clientSecret').value}};await api('/api/config',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});$('adminPass').value='';$('clientSecret').value='';toast('配置已保存')}
@@ -699,6 +699,24 @@ def api_batch_delete():
 @require_login
 def api_config_get():
     return jsonify({"ok": True, "config": sanitized_config(load_config())})
+
+
+@APP.get("/api/debug/paths")
+@require_login
+def api_debug_paths():
+    cfg = load_config()
+    graph = cfg.get("graph_application") or {}
+    return jsonify({
+        "ok": True,
+        "config_path": str(CONFIG_PATH),
+        "config_exists": CONFIG_PATH.exists(),
+        "db_path": str(DB_PATH),
+        "db_exists": DB_PATH.exists(),
+        "graph_enabled": bool(graph.get("enabled")),
+        "graph_mailboxes_count": len(graph.get("mailboxes") or []),
+        "graph_mailboxes": graph.get("mailboxes") or [],
+        "local_accounts_count": len(cfg.get("accounts") or []),
+    })
 
 
 @APP.put("/api/config")
