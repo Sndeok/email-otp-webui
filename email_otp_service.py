@@ -36,6 +36,8 @@ from urllib.parse import parse_qs, urlparse
 from urllib.parse import urlencode, quote
 import urllib.request
 import urllib.error
+import ssl
+import socket
 
 DEFAULT_CONFIG = Path.home() / ".config" / "hermes" / "email_otp_service.json"
 DEFAULT_DB = Path.home() / ".local" / "share" / "hermes" / "email_otp_service.sqlite3"
@@ -324,20 +326,36 @@ def graph_uid(mailbox: str, message_id: str) -> int:
     return int.from_bytes(digest[:7], "big")
 
 
-def http_json(method: str, url: str, headers: Dict[str, str], data: Optional[Dict[str, Any]] = None, timeout: float = 30.0) -> Dict[str, Any]:
+RETRYABLE_HTTP_EXCEPTIONS = (
+    TimeoutError,
+    socket.timeout,
+    urllib.error.URLError,
+    ssl.SSLError,
+)
+
+
+def http_json(method: str, url: str, headers: Dict[str, str], data: Optional[Dict[str, Any]] = None, timeout: float = 30.0, attempts: int = 3) -> Dict[str, Any]:
     body = None
     req_headers = dict(headers)
     if data is not None:
         body = json.dumps(data, ensure_ascii=False).encode("utf-8")
         req_headers.setdefault("Content-Type", "application/json")
-    req = urllib.request.Request(url, data=body, method=method, headers=req_headers)
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            raw = resp.read().decode("utf-8", "replace")
-            return json.loads(raw) if raw else {}
-    except urllib.error.HTTPError as e:
-        raw = e.read().decode("utf-8", "replace")
-        raise RuntimeError(f"HTTP {e.code} {url}: {raw[:1000]}") from e
+    last_error: Optional[BaseException] = None
+    for attempt in range(1, max(1, attempts) + 1):
+        req = urllib.request.Request(url, data=body, method=method, headers=req_headers)
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                raw = resp.read().decode("utf-8", "replace")
+                return json.loads(raw) if raw else {}
+        except urllib.error.HTTPError as e:
+            raw = e.read().decode("utf-8", "replace")
+            raise RuntimeError(f"HTTP {e.code} {url}: {raw[:1000]}") from e
+        except RETRYABLE_HTTP_EXCEPTIONS as e:
+            last_error = e
+            if attempt >= max(1, attempts):
+                break
+            time.sleep(min(2.0 * attempt, 5.0))
+    raise RuntimeError(f"HTTP {method} failed after {max(1, attempts)} attempts: {last_error!r}")
 
 
 def graph_get_token(graph_cfg: Dict[str, Any]) -> str:
@@ -392,6 +410,10 @@ def graph_fetch_mailbox(db_path: Path, graph_cfg: Dict[str, Any], mailbox: str, 
         "enabled": True,
     }
     upsert_account(db_path, parse_account(fake_raw))
+    # Clear a previous transient mailbox error as soon as this Graph mailbox
+    # is readable. This must happen even when there are no new messages,
+    # otherwise the WebUI can keep showing an old SSL/timeout error forever.
+    clear_account_error(db_path, account_name)
     for item in payload.get("value", []):
         processed += 1
         msg_id = item.get("id") or item.get("internetMessageId") or ""
@@ -444,7 +466,17 @@ def graph_refresh(db_path: Path, config: Dict[str, Any], mailboxes: Optional[Lis
             account_name = normalize_account_name(mailbox)
             set_account_error(db_path, account_name, repr(e))
             results.append({"account": account_name, "mailbox": mailbox, "error": repr(e)})
-    return {"ok": True, "mode": "graph_application", "results": results}
+    errors = [r for r in results if isinstance(r, dict) and r.get("error")]
+    return {"ok": not errors, "mode": "graph_application", "results": results, "error_count": len(errors)}
+
+
+def clear_account_error(db_path: Path, account_name: str) -> None:
+    conn = open_db(db_path)
+    try:
+        conn.execute("UPDATE accounts SET last_error='', updated_at=? WHERE name=?", (utc_now(), account_name))
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def set_account_error(db_path: Path, account_name: str, error: str) -> None:
