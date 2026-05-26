@@ -50,14 +50,33 @@ PROVIDER_DEFAULTS = {
     "imap": {"imap_host": None, "imap_port": 993, "ssl": True},
 }
 
-OTP_PATTERNS = [
-    re.compile(r"(?<!\d)(\d{4,8})(?!\d)"),
-    re.compile(r"(?i)verification\s*code[:\s\-]*([A-Z0-9]{4,10})"),
-    re.compile(r"(?i)security\s*code[:\s\-]*([A-Z0-9]{4,10})"),
-    re.compile(r"(?i)验证码[:\s：-]*([A-Z0-9]{4,10})"),
+OTP_CONTEXT_WORDS = [
+    "验证码",
+    "校验码",
+    "动态码",
+    "verification code",
+    "security code",
+    "login code",
+    "temporary code",
+    "one-time password",
+    "one time password",
+    "otp",
 ]
 
-KEYWORDS = ["验证码", "verification", "security code", "login code", "one-time password", "otp", "code"]
+OTP_PATTERNS = [
+    re.compile(r"(?i)verification\s*code[:\s\-]*(?:is\s*)?([A-Z0-9]{4,10})"),
+    re.compile(r"(?i)security\s*code[:\s\-]*(?:is\s*)?([A-Z0-9]{4,10})"),
+    re.compile(r"(?i)login\s*code[:\s\-]*(?:is\s*)?([A-Z0-9]{4,10})"),
+    re.compile(r"(?i)temporary\s+(?:chatgpt\s+)?(?:login\s+)?code[:\s\-]*(?:is\s*)?([A-Z0-9]{4,10})"),
+    re.compile(r"(?i)(?:one[-\s]?time\s+password|otp)[:\s\-]*(?:is\s*)?([A-Z0-9]{4,10})"),
+    re.compile(r"(?i)([A-Z0-9]{4,10})\s+is\s+your\s+(?:verification|security|login|temporary|one[-\s]?time)\s+code"),
+    re.compile(r"(?i)your\s+(?:verification|security|login|temporary|one[-\s]?time)\s+code\s+is\s+([A-Z0-9]{4,10})"),
+    re.compile(r"(?i)code[:\s\-]+([A-Z0-9]{4,10})"),
+    re.compile(r"(?i)验证码[:\s：-]*([A-Z0-9]{4,10})"),
+    re.compile(r"(?i)([A-Z0-9]{4,10})\s*(?:是|为)\s*(?:您|你的|您的)?(?:验证码|校验码|动态码)"),
+]
+
+KEYWORDS = OTP_CONTEXT_WORDS + ["verify", "authentication"]
 
 
 def utc_now() -> str:
@@ -539,12 +558,17 @@ def extract_code(subject: str, sender: str, body: str) -> tuple[Optional[str], s
     for pattern in OTP_PATTERNS:
         for match in pattern.finditer(haystack):
             code = match.group(1)
-            local_score = 1
-            snippet_start = max(0, match.start() - 60)
-            snippet_end = min(len(haystack), match.end() + 60)
+            snippet_start = max(0, match.start() - 80)
+            snippet_end = min(len(haystack), match.end() + 80)
             snippet = lowered[snippet_start:snippet_end]
-            if any(k in snippet for k in ["验证码", "verification", "security code", "login code", "otp"]):
-                local_score += 3
+            has_context = any(k in snippet for k in OTP_CONTEXT_WORDS)
+            # Never treat a bare number from newsletters, digests, addresses,
+            # dates, or postal codes as a verification code. A candidate must
+            # have OTP context near it or come from one of the explicit
+            # context-bearing regexes above.
+            if not has_context:
+                continue
+            local_score = 4
             if any(k in lowered for k in KEYWORDS):
                 local_score += 1
             if len(code) == 6 and code.isdigit():
