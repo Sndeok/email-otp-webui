@@ -16,14 +16,14 @@ import urllib.request
 from datetime import datetime
 from functools import wraps
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Iterable, Optional
 
 from flask import Flask, jsonify, redirect, request, session
 
-CONFIG_PATH = Path(os.environ.get("EMAIL_OTP_CONFIG", str(Path.home() / ".config" / "email-otp-webui" / "config.json")))
-DB_PATH = Path(os.environ.get("EMAIL_OTP_DB", str(Path.home() / ".local" / "share" / "email-otp-webui" / "email_otp_service.sqlite3")))
+CONFIG_PATH = Path(os.environ.get("EMAIL_OTP_CONFIG", str(Path.home() / ".config" / "hermes" / "email_otp_service.json")))
+DB_PATH = Path(os.environ.get("EMAIL_OTP_DB", str(Path.home() / ".local" / "share" / "hermes" / "email_otp_service.sqlite3")))
 REFRESH_URL = os.environ.get("EMAIL_OTP_REFRESH_URL", "http://127.0.0.1:8088/refresh")
-SECRET_PATH = Path(os.environ.get("EMAIL_OTP_WEBUI_SECRET", str(Path.home() / ".config" / "email-otp-webui" / "webui.secret")))
+SECRET_PATH = Path(os.environ.get("EMAIL_OTP_WEBUI_SECRET", str(Path.home() / ".config" / "hermes" / "email_otp_webui.secret")))
 APP = Flask(__name__)
 
 MAIL_PROVIDER_PRESETS = {'163': {'label': '网易 163', 'imap_host': 'imap.163.com', 'imap_port': 993, 'imap_ssl': True, 'smtp_host': 'smtp.163.com', 'smtp_port': 465, 'smtp_ssl': True, 'pop3_host': 'pop.163.com', 'pop3_port': 995, 'pop3_ssl': True}, '126': {'label': '网易 126', 'imap_host': 'imap.126.com', 'imap_port': 993, 'imap_ssl': True, 'smtp_host': 'smtp.126.com', 'smtp_port': 465, 'smtp_ssl': True, 'pop3_host': 'pop.126.com', 'pop3_port': 995, 'pop3_ssl': True}, 'yeah': {'label': '网易 yeah.net', 'imap_host': 'imap.yeah.net', 'imap_port': 993, 'imap_ssl': True, 'smtp_host': 'smtp.yeah.net', 'smtp_port': 465, 'smtp_ssl': True, 'pop3_host': 'pop.yeah.net', 'pop3_port': 995, 'pop3_ssl': True}, 'qq': {'label': 'QQ 邮箱', 'imap_host': 'imap.qq.com', 'imap_port': 993, 'imap_ssl': True, 'smtp_host': 'smtp.qq.com', 'smtp_port': 465, 'smtp_ssl': True, 'pop3_host': 'pop.qq.com', 'pop3_port': 995, 'pop3_ssl': True}, 'foxmail': {'label': 'Foxmail', 'imap_host': 'imap.qq.com', 'imap_port': 993, 'imap_ssl': True, 'smtp_host': 'smtp.qq.com', 'smtp_port': 465, 'smtp_ssl': True, 'pop3_host': 'pop.qq.com', 'pop3_port': 995, 'pop3_ssl': True}, 'outlook': {'label': 'Outlook / Microsoft 365', 'imap_host': 'outlook.office365.com', 'imap_port': 993, 'imap_ssl': True, 'smtp_host': 'smtp.office365.com', 'smtp_port': 587, 'smtp_ssl': False, 'pop3_host': 'outlook.office365.com', 'pop3_port': 995, 'pop3_ssl': True}, 'gmail': {'label': 'Gmail', 'imap_host': 'imap.gmail.com', 'imap_port': 993, 'imap_ssl': True, 'smtp_host': 'smtp.gmail.com', 'smtp_port': 465, 'smtp_ssl': True, 'pop3_host': 'pop.gmail.com', 'pop3_port': 995, 'pop3_ssl': True}, 'icloud': {'label': 'iCloud Mail', 'imap_host': 'imap.mail.me.com', 'imap_port': 993, 'imap_ssl': True, 'smtp_host': 'smtp.mail.me.com', 'smtp_port': 587, 'smtp_ssl': False, 'pop3_host': '', 'pop3_port': 995, 'pop3_ssl': True}, 'yahoo': {'label': 'Yahoo Mail', 'imap_host': 'imap.mail.yahoo.com', 'imap_port': 993, 'imap_ssl': True, 'smtp_host': 'smtp.mail.yahoo.com', 'smtp_port': 465, 'smtp_ssl': True, 'pop3_host': 'pop.mail.yahoo.com', 'pop3_port': 995, 'pop3_ssl': True}, 'sina': {'label': '新浪邮箱', 'imap_host': 'imap.sina.com', 'imap_port': 993, 'imap_ssl': True, 'smtp_host': 'smtp.sina.com', 'smtp_port': 465, 'smtp_ssl': True, 'pop3_host': 'pop.sina.com', 'pop3_port': 995, 'pop3_ssl': True}, 'sohu': {'label': '搜狐邮箱', 'imap_host': 'imap.sohu.com', 'imap_port': 993, 'imap_ssl': True, 'smtp_host': 'smtp.sohu.com', 'smtp_port': 465, 'smtp_ssl': True, 'pop3_host': 'pop3.sohu.com', 'pop3_port': 995, 'pop3_ssl': True}, '189': {'label': '189 邮箱', 'imap_host': 'imap.189.cn', 'imap_port': 993, 'imap_ssl': True, 'smtp_host': 'smtp.189.cn', 'smtp_port': 465, 'smtp_ssl': True, 'pop3_host': 'pop.189.cn', 'pop3_port': 995, 'pop3_ssl': True}, 'aliyun': {'label': '阿里邮箱', 'imap_host': 'imap.qiye.aliyun.com', 'imap_port': 993, 'imap_ssl': True, 'smtp_host': 'smtp.qiye.aliyun.com', 'smtp_port': 465, 'smtp_ssl': True, 'pop3_host': 'pop.qiye.aliyun.com', 'pop3_port': 995, 'pop3_ssl': True}, 'custom': {'label': '自定义', 'imap_host': '', 'imap_port': 993, 'imap_ssl': True, 'smtp_host': '', 'smtp_port': 465, 'smtp_ssl': True, 'pop3_host': '', 'pop3_port': 995, 'pop3_ssl': True}}
@@ -131,11 +131,20 @@ def test_mail_account(account: Dict[str, Any], protocol: str = "imap") -> Dict[s
     pop3 = account.get("pop3") or {}
     if protocol == "imap":
         host, port, use_ssl = imap.get("host"), int(imap.get("port") or 993), bool(imap.get("ssl", True))
-        client = imaplib.IMAP4_SSL(host, port) if use_ssl else imaplib.IMAP4(host, port)
+        client = imaplib.IMAP4_SSL(host, port, timeout=25) if use_ssl else imaplib.IMAP4(host, port, timeout=25)
         try:
             client.login(username, password)
+            send_netease_imap_id(client, account)
+            folder = (imap.get("folder") or account.get("folder") or "INBOX")
+            status, select_data = client.select(folder)
+            if status != "OK" and str(folder).upper() != "INBOX":
+                status, select_data = client.select("INBOX")
+                folder = "INBOX"
+            if status != "OK":
+                detail = [x.decode("utf-8", "replace") if isinstance(x, bytes) else str(x) for x in (select_data or [])]
+                raise RuntimeError(f"IMAP SELECT failed: {folder}; server_response={detail}")
             typ, boxes = client.list()
-            return {"protocol": "imap", "ok": True, "host": host, "port": port, "mailboxes": len(boxes or [])}
+            return {"protocol": "imap", "ok": True, "host": host, "port": port, "folder": folder, "mailboxes": len(boxes or [])}
         finally:
             try: client.logout()
             except Exception: pass
@@ -901,7 +910,8 @@ def api_refresh():
     payload = request.get_json(silent=True) or {}
     req = urllib.request.Request(REFRESH_URL, data=json.dumps(payload, ensure_ascii=False).encode(), method="POST", headers={"Content-Type": "application/json"})
     try:
-        with urllib.request.urlopen(req, timeout=180) as resp:
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(req, timeout=180) as resp:
             return jsonify(json.loads(resp.read().decode()))
     except Exception as e:
         return jsonify({"ok": False, "error": repr(e)}), 500

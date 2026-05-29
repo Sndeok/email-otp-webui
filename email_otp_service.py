@@ -54,6 +54,9 @@ OTP_CONTEXT_WORDS = [
     "验证码",
     "校验码",
     "动态码",
+    "登录代码",
+    "临时验证码",
+    "临时登录代码",
     "verification code",
     "security code",
     "login code",
@@ -68,15 +71,38 @@ OTP_PATTERNS = [
     re.compile(r"(?i)security\s*code[:\s\-]*(?:is\s*)?([A-Z0-9]{4,10})"),
     re.compile(r"(?i)login\s*code[:\s\-]*(?:is\s*)?([A-Z0-9]{4,10})"),
     re.compile(r"(?i)temporary\s+(?:chatgpt\s+)?(?:login\s+)?code[:\s\-]*(?:is\s*)?([A-Z0-9]{4,10})"),
+    re.compile(r"(?i)(?:enter|use|input)?\s*(?:this|your)?\s*(?:temporary\s+)?(?:verification|security|login|one[-\s]?time)\s+code(?:\s+to\s+continue)?[:\s\-]*(?:is\s*)?([A-Z0-9]{4,10})"),
     re.compile(r"(?i)(?:one[-\s]?time\s+password|otp)[:\s\-]*(?:is\s*)?([A-Z0-9]{4,10})"),
     re.compile(r"(?i)([A-Z0-9]{4,10})\s+is\s+your\s+(?:verification|security|login|temporary|one[-\s]?time)\s+code"),
     re.compile(r"(?i)your\s+(?:verification|security|login|temporary|one[-\s]?time)\s+code\s+is\s+([A-Z0-9]{4,10})"),
     re.compile(r"(?i)code[:\s\-]+([A-Z0-9]{4,10})"),
     re.compile(r"(?i)验证码[:\s：-]*([A-Z0-9]{4,10})"),
+    re.compile(r"(?i)(?:输入|使用|请(?:输入|使用)?)?\s*(?:此|这个|您的|你的)?\s*(?:临时)?(?:验证码|校验码|动态码|登录代码)(?:以继续|继续|用于登录|用于验证)?[：:\s\-]*(?:是|为)?\s*([A-Z0-9]{4,10})"),
     re.compile(r"(?i)([A-Z0-9]{4,10})\s*(?:是|为)\s*(?:您|你的|您的)?(?:验证码|校验码|动态码)"),
 ]
 
 KEYWORDS = OTP_CONTEXT_WORDS + ["verify", "authentication"]
+
+OTP_FEATURE_PATTERNS = [
+    re.compile(r"验证码|验证|校验码|动态码|登录代码|临时验证码|临时登录代码"),
+    # Match code/Code as a standalone English word, not Codex/codec/etc.
+    re.compile(r"(?i)\bcode\b"),
+]
+
+BARE_NUMERIC_CODE_RE = re.compile(r"(?<!\d)(\d{4,8})(?!\d)")
+
+COMMON_FALSE_CODE_WORDS = {
+    "security",
+    "noreply",
+    "support",
+    "service",
+    "account",
+    "verify",
+    "login",
+    "temporary",
+    "openai",
+    "chatgpt",
+}
 
 
 def utc_now() -> str:
@@ -98,6 +124,31 @@ def strip_html(text: str) -> str:
     text = text.replace("&nbsp;", " ").replace("&lt;", "<").replace("&gt;", ">")
     text = text.replace("&amp;", "&")
     return re.sub(r"\s+", " ", text).strip()
+
+
+def plausible_code_candidate(code: str) -> bool:
+    code = str(code or "").strip()
+    if not re.fullmatch(r"[A-Z0-9]{4,10}", code, flags=re.I):
+        return False
+    if code.lower() in COMMON_FALSE_CODE_WORDS:
+        return False
+    # Most OTPs are numeric or at least mixed. Reject all-letter captures so a
+    # subject such as "Your login Code" cannot consume the next line's sender
+    # name (for example "security@example.com") as the code.
+    if code.isalpha():
+        return False
+    return True
+
+
+def otp_feature_spans(text: str) -> list[tuple[int, int]]:
+    spans: list[tuple[int, int]] = []
+    for pattern in OTP_FEATURE_PATTERNS:
+        spans.extend((m.start(), m.end()) for m in pattern.finditer(text))
+    return spans
+
+
+def has_otp_feature(text: str) -> bool:
+    return bool(otp_feature_spans(text))
 
 
 def ensure_dir(path: Path) -> None:
@@ -308,10 +359,23 @@ def save_message(db_path: Path, msg: Dict[str, Any]) -> None:
     try:
         conn.execute(
             """
-            INSERT OR IGNORE INTO messages (
+            INSERT INTO messages (
                 account_name, uid, message_id, sender, recipient, subject, date, received_at,
                 snippet, body, code, code_reason, score, raw_headers
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(account_name, uid) DO UPDATE SET
+                message_id=excluded.message_id,
+                sender=excluded.sender,
+                recipient=excluded.recipient,
+                subject=excluded.subject,
+                date=excluded.date,
+                received_at=excluded.received_at,
+                snippet=excluded.snippet,
+                body=excluded.body,
+                code=excluded.code,
+                code_reason=excluded.code_reason,
+                score=excluded.score,
+                raw_headers=excluded.raw_headers
             """,
             (
                 msg["account_name"],
@@ -331,7 +395,7 @@ def save_message(db_path: Path, msg: Dict[str, Any]) -> None:
             ),
         )
         conn.execute(
-            "UPDATE accounts SET last_uid=?, last_error='', updated_at=? WHERE name=?",
+            "UPDATE accounts SET last_uid=MAX(COALESCE(last_uid, 0), ?), last_error='', updated_at=? WHERE name=?",
             (int(msg["uid"]), utc_now(), msg["account_name"]),
         )
         conn.commit()
@@ -516,6 +580,15 @@ def get_last_uid(db_path: Path, account_name: str) -> int:
         conn.close()
 
 
+def count_cached_messages(db_path: Path, account_name: str) -> int:
+    conn = open_db(db_path)
+    try:
+        row = conn.execute("SELECT COUNT(*) FROM messages WHERE account_name=?", (account_name,)).fetchone()
+        return int(row[0]) if row and row[0] is not None else 0
+    finally:
+        conn.close()
+
+
 def fetch_body_from_message(message: Message) -> str:
     parts: List[str] = []
     if message.is_multipart():
@@ -550,7 +623,7 @@ def fetch_body_from_message(message: Message) -> str:
 
 
 def extract_code(subject: str, sender: str, body: str) -> tuple[Optional[str], str, int]:
-    haystack = f"{subject}\n{sender}\n{body}"
+    haystack = f"{subject}\n{body}"
     lowered = haystack.lower()
     best = None
     reason = ""
@@ -558,18 +631,19 @@ def extract_code(subject: str, sender: str, body: str) -> tuple[Optional[str], s
     for pattern in OTP_PATTERNS:
         for match in pattern.finditer(haystack):
             code = match.group(1)
+            if not plausible_code_candidate(code):
+                continue
             snippet_start = max(0, match.start() - 80)
             snippet_end = min(len(haystack), match.end() + 80)
             snippet = lowered[snippet_start:snippet_end]
-            has_context = any(k in snippet for k in OTP_CONTEXT_WORDS)
-            # Never treat a bare number from newsletters, digests, addresses,
-            # dates, or postal codes as a verification code. A candidate must
-            # have OTP context near it or come from one of the explicit
-            # context-bearing regexes above.
+            has_context = any(k in snippet for k in OTP_CONTEXT_WORDS) or has_otp_feature(snippet)
+            # Never treat candidates from newsletters, digests, addresses,
+            # dates, or postal codes as verification codes unless there is OTP
+            # context near them or one of the broader feature words is nearby.
             if not has_context:
                 continue
             local_score = 4
-            if any(k in lowered for k in KEYWORDS):
+            if any(k in lowered for k in KEYWORDS) or has_otp_feature(haystack):
                 local_score += 1
             if len(code) == 6 and code.isdigit():
                 local_score += 1
@@ -577,6 +651,26 @@ def extract_code(subject: str, sender: str, body: str) -> tuple[Optional[str], s
                 best = code
                 score = local_score
                 reason = f"pattern={pattern.pattern}"
+    if best:
+        return best, reason, score
+
+    # User-preferred fallback: if the message has explicit verification-code
+    # feature words such as "验证码", "验证", or standalone "code"/"Code", but
+    # the provider phrases the sentence in a way no explicit regex covers, pick
+    # a nearby bare 4-8 digit number. Keep this bounded to the feature-word
+    # windows so newsletter dates/counters and "Codex" do not become OTPs.
+    for start, end in otp_feature_spans(haystack):
+        snippet_start = max(0, start - 100)
+        snippet_end = min(len(haystack), end + 140)
+        snippet = haystack[snippet_start:snippet_end]
+        for match in BARE_NUMERIC_CODE_RE.finditer(snippet):
+            code = match.group(1)
+            if not plausible_code_candidate(code):
+                continue
+            local_score = 3
+            if len(code) == 6:
+                local_score += 1
+            return code, "fallback=feature-word-near-bare-number", local_score
     return best, reason, score
 
 
@@ -622,6 +716,7 @@ def poll_account(db_path: Path, account: AccountSpec, lookback: int = 30) -> Dic
     processed = 0
     found = 0
     last_uid = get_last_uid(db_path, account.name)
+    cached_count = count_cached_messages(db_path, account.name)
     try:
         if account.imap_ssl:
             client = imaplib.IMAP4_SSL(account.imap_host, account.imap_port, timeout=25)
@@ -646,14 +741,14 @@ def poll_account(db_path: Path, account: AccountSpec, lookback: int = 30) -> Dic
                 # permission, or a provider-specific folder namespace issue.
                 detail = [x.decode("utf-8", "replace") if isinstance(x, bytes) else str(x) for x in (select_data or [])]
                 raise RuntimeError(f"SELECT folder failed: {folder}; server_response={detail}")
-            if last_uid > 0:
+            if last_uid > 0 and cached_count > 0:
                 criteria = f"UID {last_uid + 1}:*"
             else:
                 criteria = "ALL"
             status, data = client.uid("SEARCH", None, criteria)
             if status != "OK":
                 raise RuntimeError(f"SEARCH failed: {status}")
-            uid_list = [u.decode() for u in data[0].split() if u]
+            uid_list = [u.decode() for u in (data[0] or b"").split() if u]
             if last_uid <= 0 and len(uid_list) > lookback:
                 uid_list = uid_list[-lookback:]
             for uid in uid_list:
@@ -670,8 +765,6 @@ def poll_account(db_path: Path, account: AccountSpec, lookback: int = 30) -> Dic
                 message_id = decode_mime(parsed.get("Message-ID"))
                 body = fetch_body_from_message(parsed)
                 snippet = body[:500]
-                if not message_matches_filters(subject, sender, body, account.filters):
-                    continue
                 code, reason, code_score = extract_code(subject, sender, body)
                 score = score_message(subject, sender, body, account.filters)
                 if code:
@@ -705,16 +798,27 @@ def poll_account(db_path: Path, account: AccountSpec, lookback: int = 30) -> Dic
 
 def poll_all_accounts(db_path: Path, config: Dict[str, Any], accounts: Optional[List[str]] = None) -> Dict[str, Any]:
     results = []
+    requested = set(accounts or [])
+    matched: set[str] = set()
     for raw in config.get("accounts", []):
         account = parse_account(raw)
-        if accounts and account.name not in accounts:
+        if accounts and account.name not in requested:
             continue
+        if accounts:
+            matched.add(account.name)
         if not account.enabled:
             continue
         upsert_account(db_path, account)
         results.append(poll_account(db_path, account, lookback=int(config.get("lookback_messages", 30))))
+    missing = sorted(requested - matched) if accounts else []
+    for name in missing:
+        results.append({"account": name, "processed": 0, "found": 0, "error": "configured IMAP account not found"})
     errors = [r for r in results if isinstance(r, dict) and r.get("error")]
-    return {"ok": not errors, "results": results, "error_count": len(errors)}
+    error_text = "; ".join(f"{r.get('account')}: {r.get('error')}" for r in errors)
+    result = {"ok": not errors, "results": results, "error_count": len(errors)}
+    if error_text:
+        result["error"] = error_text
+    return result
 
 
 def refresh_has_errors(result: Any) -> bool:
@@ -793,7 +897,10 @@ class OTPHandler(BaseHTTPRequestHandler):
             account = q.get("account", [None])[0]
             sender = q.get("sender", [None])[0]
             keyword = q.get("keyword", [None])[0]
-            limit = int(q.get("limit", [20])[0])
+            try:
+                limit = max(1, min(int(q.get("limit", [20])[0]), 500))
+            except (ValueError, IndexError):
+                limit = 20
             self._send_json(200, {"ok": True, "messages": query_messages(server.db_path, account=account, sender=sender, keyword=keyword, limit=limit)})
             return
         if parsed.path == "/latest":
@@ -814,7 +921,11 @@ class OTPHandler(BaseHTTPRequestHandler):
             if length:
                 raw = self.rfile.read(length).decode("utf-8")
                 if raw.strip():
-                    data = json.loads(raw)
+                    try:
+                        data = json.loads(raw)
+                    except (json.JSONDecodeError, ValueError):
+                        self._send_json(400, {"ok": False, "error": "invalid JSON"})
+                        return
             target_accounts = data.get("accounts") or data.get("mailboxes")
             if isinstance(target_accounts, str):
                 target_accounts = [target_accounts]
@@ -840,12 +951,14 @@ class OTPHandler(BaseHTTPRequestHandler):
                     # poll_all_accounts expects account names, not email addresses; accept both.
                     name_map = {}
                     for raw_account in cfg.get("accounts", []):
-                        name = raw_account.get("name")
-                        username = raw_account.get("username") or raw_account.get("email")
-                        if name:
-                            name_map[name] = name
+                        account_spec = parse_account(raw_account)
+                        username = raw_account.get("username") or raw_account.get("email") or account_spec.username
+                        name_map[account_spec.name] = account_spec.name
+                        if raw_account.get("name"):
+                            name_map[str(raw_account.get("name"))] = account_spec.name
                         if username:
-                            name_map[username] = name
+                            name_map[str(username)] = account_spec.name
+                            name_map[normalize_account_name(str(username))] = account_spec.name
                     mapped = [name_map.get(x, x) for x in imap_targets]
                     results.append(poll_all_accounts(server.db_path, cfg, accounts=mapped))
             else:
